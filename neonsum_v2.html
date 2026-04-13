@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    <title>THE DAILY GEM</title>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        :root { --gem-color: #00f2ff; --correct: #ffbf00; --bg: #0d1117; --card: #1c2128; --text: #ffffff; }
+        
+        body { 
+            background-color: var(--bg); 
+            color: var(--text); 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            height: 100vh; 
+            height: -webkit-fill-available; /* Fixes mobile browser address bar height */
+            overflow: hidden; 
+        }
+
+        #top-nav { width: 100%; max-width: 500px; padding: 15px; display: flex; justify-content: space-between; box-sizing: border-box; }
+        .stat-capsule { background: rgba(255, 255, 255, 0.05); padding: 8px 14px; border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); font-weight: 700; }
+        
+        #riddle-card { 
+            background: var(--card); 
+            width: 88%; 
+            max-width: 400px; 
+            padding: 20px 15px; 
+            border-radius: 30px; 
+            text-align: center; 
+            margin-bottom: 5px; 
+            border: 1px solid rgba(255,255,255,0.1); 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+        }
+
+        #emoji-clues { font-size: 2rem; margin: 10px 0; display: block; min-height: 45px; }
+        
+        #board { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 6px; 
+            padding: 10px; 
+            flex-grow: 1; 
+            align-items: center; 
+            justify-content: center;
+        }
+
+        .row { display: flex; gap: 4px; }
+        .tile { 
+            width: 32px; 
+            height: 40px; 
+            border: 2px solid #30363d; 
+            border-radius: 10px; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            font-size: 1.1rem; 
+            font-weight: 800; 
+            text-transform: uppercase; 
+        }
+        .tile.space { border: none; width: 8px; background: transparent; }
+        .correct { background: var(--correct); color: #000; border-color: var(--correct); }
+        .present { border-color: var(--correct); color: var(--correct); border-width: 3px; }
+        .absent { opacity: 0.1; }
+
+        #keyboard-area { 
+            width: 100%; 
+            max-width: 500px; 
+            padding-bottom: 110px; /* CLEARANCE FOR TINYHOST BANNER */
+            background: rgba(13,17,23,0.9); 
+            backdrop-filter: blur(10px); 
+            touch-action: manipulation; /* Prevents zooming on fast taps */
+        }
+
+        .keyboard-row { display: flex; justify-content: center; gap: 4px; margin-bottom: 6px; padding: 0 8px; }
+        .key { 
+            background: #3e444d; 
+            color: #fff; 
+            border: 0; 
+            border-radius: 6px; 
+            height: 48px; 
+            flex: 1; 
+            font-weight: 700; 
+            cursor: pointer; 
+            -webkit-tap-highlight-color: transparent; 
+            font-size: 0.9rem;
+        }
+        .key.large { flex: 1.5; background: #565f69; }
+
+        #overlay { display: none; position: fixed; inset: 0; background: rgba(13,17,23,0.98); z-index: 100; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        #share-btn { background: var(--gem-color); color: #000; border: none; padding: 18px 50px; border-radius: 40px; font-weight: 800; cursor: pointer; font-size: 1.1rem; }
+    </style>
+</head>
+<body>
+
+    <div id="top-nav">
+        <div class="stat-capsule" style="color:#ff5e57">🔥 <span id="streak-val">0</span></div>
+        <div class="stat-capsule" style="color:var(--gem-color)">💎 <span id="gem-val">0</span></div>
+    </div>
+
+    <div id="riddle-card">
+        <div id="category-tag" style="font-size: 0.65rem; opacity: 0.5; letter-spacing: 2px; font-weight: bold;">DAILY VIBE</div>
+        <div id="emoji-clues">🔍 Syncing...</div>
+        <div style="color:var(--correct); font-weight: 800; font-size: 0.85rem;">TARGET SUM: <span id="target-val">--</span></div>
+    </div>
+
+    <div id="board"></div>
+
+    <div id="keyboard-area">
+        <div id="msg" style="text-align:center; height: 25px; font-weight: bold; color: var(--gem-color); font-size: 0.85rem; margin-bottom: 5px;"></div>
+        <div class="keyboard-row" id="row1"></div>
+        <div class="keyboard-row" id="row2"></div>
+        <div class="keyboard-row" id="row3"></div>
+    </div>
+
+    <div id="overlay">
+        <div style="font-size: 4rem; margin-bottom: 10px;">💎</div>
+        <h1 id="ov-title">GEM COLLECTED</h1>
+        <p id="ov-sub">See you tomorrow for the next vibe.</p>
+        <button id="share-btn" onclick="shareStats()">SHARE SCORE</button>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const API_URL = 'PASTE_YOUR_WEB_APP_URL_HERE';
+
+        let targetWord, targetSum, item;
+        let guess = "", currentRow = 0, gameOver = false, shareBoxes = [];
+        let gems = parseInt(localStorage.getItem('gemStore')) || 0;
+        let streak = parseInt(localStorage.getItem('streakCount')) || 0;
+        const today = new Date().toDateString();
+
+        async function initGame() {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+
+                item = {
+                    word: data.word.toUpperCase(),
+                    emojis: data.emojis || "🎬🍿✨",
+                    cat: (data.cat || "DAILY VIBE").toUpperCase()
+                };
+
+                targetWord = item.word;
+                targetSum = targetWord.split('').reduce((a, c) => {
+                    const code = c.charCodeAt(0) - 64;
+                    return (code >= 1 && code <= 26) ? a + code : a;
+                }, 0);
+
+                setupUI();
+            } catch (err) {
+                document.getElementById('emoji-clues').innerText = "⚠️ Offline";
+                console.error(err);
+            }
+        }
+
+        function setupUI() {
+            document.getElementById('emoji-clues').innerText = item.emojis;
+            document.getElementById('target-val').innerText = targetSum;
+            document.getElementById('category-tag').innerText = item.cat;
+            document.getElementById('gem-val').innerText = gems;
+            document.getElementById('streak-val').innerText = streak;
+
+            const board = document.getElementById('board');
+            board.innerHTML = "";
+            for (let i = 0; i < 6; i++) {
+                const row = document.createElement('div'); row.className = 'row';
+                for (let char of targetWord) {
+                    const tile = document.createElement('div');
+                    tile.className = char === " " ? 'tile space' : 'tile';
+                    row.appendChild(tile);
+                }
+                board.appendChild(row);
+            }
+            if (localStorage.getItem('dailyDone') === today) { gameOver = true; showOverlay(); }
+        }
+
+        const keys = [['Q','W','E','R','T','Y','U','I','O','P'],['A','S','D','F','G','H','J','K','L'],['ENTER','Z','X','C','V','B','N','M','⌫']];
+        keys.forEach((r, idx) => {
+            const rowEl = document.getElementById(`row${idx+1}`);
+            r.forEach(k => {
+                const b = document.createElement('button'); b.className = `key ${k.length > 1 ? 'large' : ''}`;
+                b.innerText = k; b.onclick = () => handleInput(k === '⌫' ? 'BACK' : k);
+                rowEl.appendChild(b);
+            });
+        });
+
+        function handleInput(k) {
+            if (gameOver) return;
+            const cleanTarget = targetWord.replace(/\s/g, '');
+            if (k === 'ENTER' && guess.length === cleanTarget.length) submit();
+            else if (k === 'BACK') { guess = guess.slice(0, -1); updateTiles(); }
+            else if (guess.length < cleanTarget.length && k.length === 1 && /[A-Z]/.test(k)) { guess += k; updateTiles(); }
+        }
+
+        function updateTiles() {
+            const tiles = document.querySelectorAll('.row')[currentRow].querySelectorAll('.tile:not(.space)');
+            tiles.forEach((t, i) => t.innerText = guess[i] || "");
+            const currentSum = guess.split('').reduce((a, c) => a + (c.charCodeAt(0) - 64), 0);
+            document.getElementById('msg').innerText = "VIBE SUM: " + currentSum;
+        }
+
+        function submit() {
+            const tiles = document.querySelectorAll('.row')[currentRow].querySelectorAll('.tile');
+            let gIdx = 0, rowEmoji = "";
+            const cleanTarget = targetWord.replace(/\s/g, '');
+            
+            for (let i = 0; i < targetWord.length; i++) {
+                if (targetWord[i] === " ") continue;
+                if (guess[gIdx] === targetWord[i]) { tiles[i].classList.add('correct'); rowEmoji += "🟦"; }
+                else if (targetWord.includes(guess[gIdx])) { tiles[i].classList.add('present'); rowEmoji += "⬜"; }
+                else { tiles[i].classList.add('absent'); rowEmoji += "⬛"; }
+                gIdx++;
+            }
+            shareBoxes.push(rowEmoji);
+
+            if (guess === cleanTarget) {
+                confetti(); gems += 10; streak++;
+                localStorage.setItem('gemStore', gems); localStorage.setItem('streakCount', streak);
+                localStorage.setItem('dailyDone', today);
+                gameOver = true; setTimeout(showOverlay, 1000);
+            } else {
+                currentRow++; guess = "";
+                if (currentRow === 6) { gameOver = true; document.getElementById('ov-title').innerText = "VIBE FADED"; showOverlay(); }
+            }
+        }
+
+        function showOverlay() { document.getElementById('overlay').style.display = 'flex'; }
+
+        async function shareStats() {
+            const text = `THE DAILY GEM 💎\n${item.emojis}\n${shareBoxes.join('\n')}\nStreak: ${streak}`;
+            if (navigator.share) { await navigator.share({ text: text }); } 
+            else { navigator.clipboard.writeText(text); alert("Results copied!"); }
+        }
+
+        initGame();
+        document.addEventListener('keydown', (e) => handleInput(e.key.toUpperCase()));
+    </script>
+</body>
+</html>
